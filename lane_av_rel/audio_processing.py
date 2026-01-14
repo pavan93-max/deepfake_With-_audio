@@ -256,7 +256,6 @@ class ConformerBlock(nn.Module):
         
         # Convolution
         self.conv = nn.Sequential(
-            nn.LayerNorm(embed_dim),
             nn.Conv1d(embed_dim, embed_dim * 2, 1),
             nn.GLU(dim=1),
             nn.Conv1d(embed_dim, embed_dim, conv_kernel_size, padding=conv_kernel_size//2, groups=embed_dim),
