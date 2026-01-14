@@ -60,16 +60,29 @@ class MultiModalRelationGraph(nn.Module):
                 "Or set use_graph=False in model config to disable graph features."
             )
         
-        self.gat_layers = nn.ModuleList([
-            GATConv(
-                hidden_dim,
-                hidden_dim,
-                heads=num_heads,
-                dropout=dropout,
-                concat=(i < num_layers - 1)  # Last layer averages heads
+        # GAT layers: handle dimension changes when concat=True
+        # When concat=True, output is hidden_dim * num_heads
+        # When concat=False, output is hidden_dim
+        self.gat_layers = nn.ModuleList()
+        for i in range(num_layers):
+            concat = (i < num_layers - 1)  # Last layer averages heads
+            
+            if i == 0:
+                # First layer: input is hidden_dim
+                in_dim = hidden_dim
+            else:
+                # Subsequent layers: input is hidden_dim * num_heads (from previous layer with concat=True)
+                in_dim = hidden_dim * num_heads
+            
+            self.gat_layers.append(
+                GATConv(
+                    in_dim,
+                    hidden_dim,  # out_channels per head
+                    heads=num_heads,
+                    dropout=dropout,
+                    concat=concat
+                )
             )
-            for i in range(num_layers)
-        ])
         
         # Edge type embeddings
         self.edge_type_embeddings = nn.Embedding(4, hidden_dim)  # 4 edge types
@@ -118,66 +131,80 @@ class MultiModalRelationGraph(nn.Module):
         edge_index = []
         edge_attr = []
         
-        # 1. Spatial adjacency (between regions at same time step)
+        # Calculate node offsets for each region type
         num_regions = len(region_embeddings)
         region_times = [emb.shape[1] for emb in region_embeddings.values()]
         max_time = max(region_times) if region_times else 0
         
-        region_node_start = 0
-        for i, (name1, emb1) in enumerate(region_embeddings.items()):
-            T1 = emb1.shape[1]
-            for j, (name2, emb2) in enumerate(region_embeddings.items()):
-                if i != j:  # Different regions
-                    T2 = emb2.shape[1]
-                    T_min = min(T1, T2)
-                    for t in range(T_min):
-                        # Connect nodes at same time step
-                        node1 = region_node_start + i * max_time + t
-                        node2 = region_node_start + j * max_time + t
-                        edge_index.append([node1, node2])
-                        edge_attr.append(0)  # Edge type: spatial adjacency
+        # Calculate cumulative offsets for each region type
+        # Nodes are organized as: [region0_batch0, region0_batch1, ..., region1_batch0, ...]
+        region_offsets = {}
+        current_offset = 0
+        for name, T_r in zip(region_embeddings.keys(), region_times):
+            region_offsets[name] = current_offset
+            current_offset += T_r * B  # Each region has B * T_r nodes
         
-        # 2. Frequency similarity (between same region across time)
-        # (Simplified: connect temporally adjacent nodes)
-        for name, emb in region_embeddings.items():
-            T = emb.shape[1]
-            for t in range(T - 1):
-                node1 = region_node_start + list(region_embeddings.keys()).index(name) * max_time + t
-                node2 = region_node_start + list(region_embeddings.keys()).index(name) * max_time + t + 1
-                edge_index.append([node1, node2])
-                edge_attr.append(1)  # Edge type: frequency similarity
+        audio_node_start = current_offset  # Audio nodes start after all region nodes
         
-        # 3. AV timing (phoneme↔viseme)
-        audio_node_start = sum(region_times) * B
-        if phoneme_times:
-            # Connect audio nodes to mouth region nodes based on timing
-            mouth_idx = list(region_embeddings.keys()).index('mouth') if 'mouth' in region_embeddings else None
-            if mouth_idx is not None:
+        # Build edges for each batch separately
+        for b in range(B):
+            # For batch b, region nodes start at: region_offset + b * T_r
+            # Audio nodes start at: audio_node_start + b * T_a
+            
+            # 1. Spatial adjacency (between regions at same time step)
+            for i, (name1, emb1) in enumerate(region_embeddings.items()):
+                T1 = emb1.shape[1]
+                offset1 = region_offsets[name1]
+                for j, (name2, emb2) in enumerate(region_embeddings.items()):
+                    if i != j:  # Different regions
+                        T2 = emb2.shape[1]
+                        offset2 = region_offsets[name2]
+                        T_min = min(T1, T2)
+                        for t in range(T_min):
+                            # Connect nodes at same time step within this batch
+                            # For batch b, region nodes are at: offset + b * T_r + t
+                            node1 = offset1 + b * T1 + t
+                            node2 = offset2 + b * T2 + t
+                            edge_index.append([node1, node2])
+                            edge_attr.append(0)  # Edge type: spatial adjacency
+            
+            # 2. Frequency similarity (between same region across time)
+            for name, emb in region_embeddings.items():
+                T = emb.shape[1]
+                offset = region_offsets[name]
+                for t in range(T - 1):
+                    node1 = offset + b * T + t
+                    node2 = offset + b * T + t + 1
+                    edge_index.append([node1, node2])
+                    edge_attr.append(1)  # Edge type: frequency similarity
+            
+            # 3. AV timing (phoneme↔viseme)
+            if phoneme_times and 'mouth' in region_embeddings:
+                mouth_offset = region_offsets['mouth']
                 T_mouth = region_embeddings['mouth'].shape[1]
                 for t_a in range(T_a):
                     # Find corresponding mouth time (simplified)
                     t_mouth = int(t_a * T_mouth / T_a)
                     if t_mouth < T_mouth:
-                        audio_node = audio_node_start + t_a
-                        mouth_node = region_node_start + mouth_idx * max_time + t_mouth
+                        audio_node = audio_node_start + b * T_a + t_a
+                        mouth_node = mouth_offset + b * T_mouth + t_mouth
                         edge_index.append([audio_node, mouth_node])
                         edge_index.append([mouth_node, audio_node])  # Bidirectional
                         edge_attr.append(2)  # Edge type: AV timing
                         edge_attr.append(2)
-        
-        # 4. Blink/prosody links (eye nodes ↔ audio prosody)
-        # Connect eye regions to audio based on prosody
-        for eye_name in ['left_eye', 'right_eye']:
-            if eye_name in region_embeddings:
-                eye_idx = list(region_embeddings.keys()).index(eye_name)
-                T_eye = region_embeddings[eye_name].shape[1]
-                for t_eye in range(T_eye):
-                    t_audio = int(t_eye * T_a / T_eye)
-                    if t_audio < T_a:
-                        eye_node = region_node_start + eye_idx * max_time + t_eye
-                        audio_node = audio_node_start + t_audio
-                        edge_index.append([eye_node, audio_node])
-                        edge_attr.append(3)  # Edge type: blink/prosody
+            
+            # 4. Blink/prosody links (eye nodes ↔ audio prosody)
+            for eye_name in ['left_eye', 'right_eye']:
+                if eye_name in region_embeddings:
+                    eye_offset = region_offsets[eye_name]
+                    T_eye = region_embeddings[eye_name].shape[1]
+                    for t_eye in range(T_eye):
+                        t_audio = int(t_eye * T_a / T_eye)
+                        if t_audio < T_a:
+                            eye_node = eye_offset + b * T_eye + t_eye
+                            audio_node = audio_node_start + b * T_a + t_audio
+                            edge_index.append([eye_node, audio_node])
+                            edge_attr.append(3)  # Edge type: blink/prosody
         
         # Convert to tensors
         if edge_index:
@@ -203,10 +230,12 @@ class MultiModalRelationGraph(nn.Module):
             region_embeddings: Dict of (B, T, embed_dim) region sequences
             audio_embeddings: (B, T_a, audio_dim) audio sequence
             phoneme_times: Optional phoneme timing
-            
+        
         Returns:
             (B, hidden_dim) graph representation
         """
+        B, T_a, _ = audio_embeddings.shape
+        
         # Build graph
         data = self.build_graph(region_embeddings, audio_embeddings, phoneme_times)
         
@@ -220,10 +249,17 @@ class MultiModalRelationGraph(nn.Module):
         
         x = self.norm(x)
         
-        # Global pooling (mean)
-        # Reshape back to batch format
-        # This is simplified - in practice, need to track node indices per batch
-        x_pooled = x.mean(dim=0, keepdim=True)  # (1, hidden_dim)
+        # Calculate nodes per batch
+        # Nodes are organized as: [batch0_all_nodes, batch1_all_nodes, ...]
+        # For each batch: sum(T_r for all regions) + T_a nodes
+        region_times = [emb.shape[1] for emb in region_embeddings.values()]
+        nodes_per_batch = sum(region_times) + T_a
+        
+        # Reshape to separate batches: (B, nodes_per_batch, hidden_dim)
+        x = x.view(B, nodes_per_batch, self.hidden_dim)
+        
+        # Pool over nodes per batch to get (B, hidden_dim)
+        x_pooled = x.mean(dim=1)  # (B, hidden_dim)
         
         return x_pooled
 
