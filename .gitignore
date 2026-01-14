@@ -68,6 +68,8 @@ desktop.ini
 cleaned_dataset/
 fake/
 real/
+real_extracted/
+real_extracted_test/
 *.zip
 *.avi
 *.mov
@@ -78,6 +80,7 @@ real/
 
 # Outputs and logs
 outputs/
+outputs_federated/
 *.log
 logs/
 tensorboard_logs/
