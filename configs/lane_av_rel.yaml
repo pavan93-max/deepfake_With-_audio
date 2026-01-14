@@ -1,0 +1,37 @@
+# LANe-AV-Rel Configuration
+
+# Model
+roi_size: 64
+region_embed_dim: 128
+audio_embed_dim: 128
+graph_hidden_dim: 256
+use_artifacts: true
+use_temporal: true
+use_audio: true
+use_graph: true
+
+# Training
+num_epochs: 100
+batch_size: 4
+lr: 0.001
+weight_decay: 0.0001
+video_length: 32
+
+# Loss weights
+ce_weight: 1.0
+av_weight: 0.5
+temporal_weight: 0.1
+calibration_weight: 0.1
+
+# Data
+num_workers: 4
+
+# Federated Learning
+federated:
+  num_clients: 10
+  num_rounds: 100
+  local_epochs: 1
+  aggregation_method: median
+  prototype_dim: 128
+  dp_sigma: 1.0
+

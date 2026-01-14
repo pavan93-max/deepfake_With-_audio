@@ -1,0 +1,53 @@
+# Core dependencies (Python 3.8-3.11 compatible)
+torch>=2.0.0,<2.5.0
+torchvision>=0.15.0,<0.20.0
+torchaudio>=2.0.0,<2.5.0
+numpy>=1.24.0,<2.4.0
+opencv-python>=4.8.0,<5.0.0
+scipy>=1.10.0,<2.0.0
+scikit-learn>=1.3.0,<2.0.0
+librosa>=0.10.0,<1.0.0
+soundfile>=0.12.0
+PyWavelets>=1.4.0,<2.0.0
+transformers>=4.30.0,<5.0.0
+timm>=0.9.0,<1.0.0
+matplotlib>=3.7.0,<4.0.0
+seaborn>=0.12.0,<1.0.0
+tqdm>=4.65.0
+tensorboard>=2.13.0,<3.0.0
+pyyaml>=6.0,<7.0.0
+pandas>=2.0.0,<3.0.0
+pillow>=10.0.0,<11.0.0
+cryptography>=41.0.0,<44.0.0
+pycryptodome>=3.18.0
+
+# Face detection - InsightFace (preferred) or MediaPipe (fallback)
+# InsightFace provides higher accuracy and avoids protobuf conflicts
+# 
+# IMPORTANT: InsightFace 0.7+ requires Visual C++ Build Tools on Windows
+# 1. Download and install: https://visualstudio.microsoft.com/visual-cpp-build-tools/
+# 2. Then install: pip install insightface>=0.7.0 --no-binary insightface
+# 
+# If you can't install Visual C++ Build Tools, InsightFace 0.2.1 will be installed
+# (has pre-built wheels but requires manual model downloads)
+insightface>=0.7.0
+onnxruntime>=1.15.0  # Required for InsightFace
+# MediaPipe (fallback - Python 3.8-3.11 only, has protobuf conflicts)
+mediapipe>=0.10.0,<0.11.0
+
+# Graph libraries (optional, for relation graph)
+# Install separately if needed: pip install dgl torch-geometric
+dgl>=1.1.0
+torch-geometric>=2.3.0
+
+# Audio processing (optional - pyannote.audio may have Python 3.12 issues)
+# Install separately if needed: pip install pyannote.audio
+pyannote.audio>=3.0.0
+
+# Phoneme alignment (NOT on PyPI - install from GitHub or conda)
+# Montreal Forced Alignment must be installed separately:
+# Option 1: conda install -c conda-forge montreal-forced-alignment
+# Option 2: pip install montreal-forced-alignment (if available)
+# Option 3: Install from source: https://github.com/MontrealCorpusTools/Montreal-Forced-Alignment
+# montreal-forced-alignment>=2.0.0
+
