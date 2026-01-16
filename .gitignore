@@ -63,7 +63,7 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 desktop.ini
-
+deep/
 # Dataset files (large, should not be committed)
 cleaned_dataset/
 fake/

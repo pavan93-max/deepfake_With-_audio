@@ -354,8 +354,12 @@ class FaceParser:
         
         # Crop and resize
         roi = image[y_min:y_max, x_min:x_max]
+        if roi is None or roi.size == 0:
+            return None, None
         roi_resized = cv2.resize(roi, (self.roi_size, self.roi_size))
         
+        
+
         bbox = (x_min, y_min, x_max - x_min, y_max - y_min)
         
         return roi_resized, bbox
@@ -385,10 +389,12 @@ class FaceParser:
             valid_indices = [i for i in indices if i < len(landmarks)]
             if len(valid_indices) < 3:  # Need at least 3 points
                 continue
-                
+
             roi_image, bbox = self.extract_roi(image, valid_indices, landmarks)
+            if roi_image is None:
+                continue
             roi_landmarks = landmarks[valid_indices]
-            
+
             rois[roi_name] = FaceROI(
                 name=roi_name,
                 bbox=bbox,
